@@ -271,7 +271,60 @@ errlog()
 	echo "$*" 1>&2
 }
 
+repo-readdescs() {
+	local targetdir=$1
+	local repo=$2
+	local arch=$3
 
+	DBFILE="$targetdir/$repo/os/$arch/$repo.db.tar.gz"
+
+	if [ "$arch" = "any" ]
+	then
+		return 1
+	fi
+
+	if ! [ -e "$DBFILE" ]
+	then
+		errlog \(EE\) $DBFILE not found	
+		return 1
+	fi
+
+	tar -xzOf "$DBFILE" --wildcards */desc	
+}
+
+repo-readmd5sums() {
+	local targetdir=$1
+	local repo=$2
+	local arch=$3
+
+	repo-readdescs "$targetdir" "$repo" "$arch" | 
+	(
+		error=0
+		lastline=""
+
+		filename=""
+		md5sum=""
+
+		line=""
+
+		while read line
+		do
+			if [ "$lastline" == "%FILENAME%" ]
+			then
+				filename="$line"
+			elif [ "$lastline" == "%MD5SUM%" ]
+			then
+				md5sum=$line
+				echo "$md5sum $filename"
+			fi
+
+			lastline="$line"
+		done
+
+		return $error
+	)
+
+}
 
 consistencycheck()
 {
@@ -282,58 +335,39 @@ consistencycheck()
 
 	if ! [ "$arch" = "any" ]
 	then
-		DBFILE="$targetdir/$repo/os/$arch/$repo.db.tar.gz"
-
-		if ! [ -e $DBFILE ]
-		then
-			errlog \(EE\) $DBFILE not found
-			return 1
-		fi
-
-		tar -xzOf "$DBFILE" --wildcards */desc | 
+		repo-readmd5sums "$targetdir" "$repo" "$arch" | 
 		(
 			error=0
-			lastline=""
 
 			filename=""
 			md5sum=""
 
-			while read line
+			while read md5sum filename
 			do
-				if [ "$lastline" == "%FILENAME%" ]
+				if [ -L "$targetdir/$repo/os/$arch/$filename" ] && ! [ -e "$targetdir/$repo/os/any/$filename" ]
 				then
-					filename="$line"
-
-					if [ -L "$targetdir/$repo/os/$arch/$filename" ] && ! [ -e "$targetdir/$repo/os/any/$filename" ]
-					then
-						errlog \(EE\) missing package: $repo/os/any/$filename
-						error=1
-					fi
-
-					if ! [ -e "$targetdir/$repo/os/$arch/$filename" ]
-					then
-						errlog \(EE\) missing package: $repo/os/$arch/$filename
-						error=1
-					fi
-				elif [ "$lastline" == "%MD5SUM%" ]
-				then
-					md5sum=$line
-
-					if [ $domd5sum -eq 1 ] && ( echo "$md5sum  $targetdir/$repo/os/$arch/$filename" | md5sum -c --quiet; [ $? -eq 1 ] )
-					then
-						errlog \(EE\) md5sum corruption of package: $repo/os/$arch/$filename ... deleting file
-
-						if ! [ -e "$targetdir/$repo/os/$arch/$filename" ] || [ -L "$targetdir/$repo/os/$arch/$filename" ]
-						then
-							rm "$targetdir/$repo/os/any/$filename"
-						else
-							rm "$targetdir/$repo/os/$arch/$filename"
-						fi
-						error=1
-					fi
+					errlog \(EE\) missing package: $repo/os/any/$filename
+					error=1
 				fi
 
-				lastline="$line"
+				if ! [ -e "$targetdir/$repo/os/$arch/$filename" ]
+				then
+					errlog \(EE\) missing package: $repo/os/$arch/$filename
+					error=1
+				fi
+				
+				if [ $domd5sum -eq 1 ] && ( echo "$md5sum  $targetdir/$repo/os/$arch/$filename" | md5sum -c --quiet; [ $? -eq 1 ] )
+				then
+					errlog \(EE\) md5sum corruption of package: $repo/os/$arch/$filename ... deleting file
+
+					if ! [ -e "$targetdir/$repo/os/$arch/$filename" ] || [ -L "$targetdir/$repo/os/$arch/$filename" ]
+					then
+						rm "$targetdir/$repo/os/any/$filename"
+					else
+						rm "$targetdir/$repo/os/$arch/$filename"
+					fi
+					error=1
+				fi
 			done
 
 			return $error

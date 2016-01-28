@@ -239,7 +239,7 @@ function usage() {
 	echo "			default: -r core -r extra -r community -r multilib"
 	echo ""
 	echo " -c		only check consistency"
-	echo " -d		target directory (default: \".\")"
+	echo " -d <directory>	target directory (default: \".\")"
 	echo " -h		show help"
 	echo " -i		do md5 integrity check"
 	echo " -m <mirror>	use specified mirror"

@@ -27,7 +27,7 @@ function setDefaultConfiguration() {
 	#
 }
 
-function setConfiguration() {
+function config-setfromarguments() {
 	CONFIG_MIRROR=""
 	CONFIG_REPOS=""
 	CONFIG_ARCHS=""
@@ -118,6 +118,22 @@ function setConfiguration() {
 	then
 		CONFIG_VERBOSITY=$ARG_VERBOSITY
 	fi
+}
+
+config-getarchs() {
+	local repo="$1"
+	local arch
+
+	for arch in $CONFIG_ARCHS
+	do
+		# multilib uses 64 bit arch only -> skip all other architectures for this
+		if ( [ "$repo" = "multilib" ] || [ "$repo" = "multilib-testing" ] ) && [ "$arch" != "x86_64" ]
+		then
+			continue
+		fi
+
+		echo "$arch"
+	done
 }
 
 function parseOpts() {
@@ -261,22 +277,6 @@ repo-readmd5sums() {
 		return $error
 	)
 
-}
-
-config-getarchs() {
-	local repo="$1"
-	local arch
-
-	for arch in $CONFIG_ARCHS
-	do
-		# multilib uses 64 bit arch only -> skip all other architectures for this
-		if ( [ "$repo" = "multilib" ] || [ "$repo" = "multilib-testing" ] ) && [ "$arch" != "x86_64" ]
-		then
-			continue
-		fi
-
-		echo "$arch"
-	done
 }
 
 repo-getarchdirs() {
@@ -490,7 +490,7 @@ sync-getrepoarchconsistency() {
 	fi
 }
 
-setConfiguration "$@"
+config-setfromarguments "$@"
 
 if [ "$CONFIG_ACTION" = "usage" ]
 then

@@ -263,7 +263,76 @@ repo-readmd5sums() {
 
 }
 
-consistencycheck()
+repo-getarchs() {
+	local repo="$1"
+	local arch
+
+	for arch in $CONFIG_ARCHS
+	do
+		# multilib uses 64 bit arch only -> skip all other architectures for this
+		if ( [ "$repo" = "multilib" ] || [ "$repo" = "multilib-testing" ] ) && [ "$arch" != "x86_64" ]
+		then
+			continue
+		fi
+
+		echo "$arch"
+	done
+}
+
+repo-getarchdirs() {
+	local repo="$1"
+	local arch=""
+
+	repo-getarchs "$repo" | while read arch
+	do
+		echo "$repo/os/$arch"
+	done
+}
+
+repo-mkdirtargetarchdirs() {
+	local targetdir="$1"
+	local repo="$2"
+	local arch=""
+
+	repo-getarchs "$repo" | while read arch
+	do
+		mkdir -p "$targetdir/$repo/os/$arch"
+	done
+}
+
+repo-getrsyncierules() {
+	local repo="$1"
+	local arch=""
+
+	repo-getarchs "$repo" | while read arch
+	do
+		echo -n " --include="$arch" --include="$arch/**""
+	done
+	echo " --exclude="*""
+}
+
+repo-restoreconsistentcontrolfiles() {
+	local targetdir="$1"
+	local repo="$2"
+	local arch=""
+
+	for arch in $CONFIG_ARCHS
+	do
+		if ! [ "$arch" = "any" ]
+		then
+			for db in abs db files
+			do
+				if [ -e "$targetdir/$repo/os/backup/$arch/$repo.$db.tar.gz.consistent" ]
+				then
+					mv "$targetdir/$repo/os/backup/$arch/$repo.$db.tar.gz.consistent" "$targetdir/$repo/os/$arch/"
+				fi
+			done
+		fi
+	done
+}
+
+
+repo-consistencycheck()
 {
 	local targetdir=$1
 	local repo=$2
@@ -333,58 +402,43 @@ else
 	log 1 \(II\) archs: $CONFIG_ARCHS
 fi
 
-rsyncopts="-abv --copy-unsafe-links --no-motd --delete --ignore-errors --backup-dir=backup"
 
-dcount=0
+# prepare target directories
 for repo in $CONFIG_REPOS
 do
-	ierules=""
+	repo-mkdirtargetarchdirs "$CONFIG_TARGETDIR" "$repo" 
+done
 
-	for arch in $CONFIG_ARCHS
+# repo package sync
+if [ "$CONFIG_ACTION" = "sync" ]
+then
+	rsyncopts="-abv --copy-unsafe-links --no-motd --delete --ignore-errors --backup-dir=backup"
+
+	dcount=0
+	for repo in $CONFIG_REPOS
 	do
-		if ( [ "$repo" = "multilib" ] || [ "$repo" = "multilib-testing" ] ) && [ "$arch" != "x86_64" ]
-		then
-			continue
-		fi
+		ierules="$( repo-getrsyncierules "$repo" )"
 
-		mkdir -p "$CONFIG_TARGETDIR/$repo/os/$arch"
-		ierules="$ierules --include="$arch" --include="$arch/**""
-	done
-	ierules="$ierules --exclude="*""
-
-	(
-		if [ "$CONFIG_ACTION" = "sync" ]
-		then
+		(
 			log 1 \(II\) syncing $repo/os ...
 
 			rsync $rsyncopts $ierules "$CONFIG_MIRROR/$repo/os/" "$CONFIG_TARGETDIR/$repo/os/" 2>> "$CONFIG_TARGETDIR/sync.log" 1> /dev/null
-
-			for arch in $CONFIG_ARCHS
-			do
-				if ! [ "$arch" = "any" ]
-				then
-					for db in abs db files
-					do
-						if [ -e "$CONFIG_TARGETDIR/$repo/os/backup/$arch/$repo.$db.tar.gz.consistent" ]
-						then
-							mv "$CONFIG_TARGETDIR/$repo/os/backup/$arch/$repo.$db.tar.gz.consistent" "$CONFIG_TARGETDIR/$repo/os/$arch/"
-						fi
-					done
-				fi
-			done
+			repo-restoreconsistentcontrolfiles "$CONFIG_TARGETDIR" "$repo"
 
 			log 1 \(II\) done syncing $repo/os.
+		) &
+
+		dcount=$(( $dcount + 1))
+
+		if [ $dcount -ge $CONFIG_PARALLELDOWNLOADS ]
+		then
+			wait
+			dcount=0
 		fi
-	) &
-	dcount=$(( $dcount + 1))
+	done
+fi
 
-	if [ $dcount -ge $CONFIG_PARALLELDOWNLOADS ]
-	then
-		wait
-		dcount=0
-	fi
-done
-
+# iso sync
 if [ "$CONFIG_ACTION" = "sync" ]
 then
 	wait
@@ -423,7 +477,7 @@ do
 
 		log 1 \(II\) checking consistency of $repo/os/$arch ...
 
-		if ! consistencycheck "$CONFIG_TARGETDIR" $repo $arch $CONFIG_INTEGRITY_CHECK
+		if ! repo-consistencycheck "$CONFIG_TARGETDIR" $repo $arch $CONFIG_INTEGRITY_CHECK
 		then
 			errlog \(WW\) $repo/os/$arch is inconsistent... trying to revert to old db...
 
@@ -439,7 +493,7 @@ do
 			cp -r "$CONFIG_TARGETDIR/$repo/os/backup/any/." "$CONFIG_TARGETDIR/$repo/os/any/"
 
 
-			if ! consistencycheck "$CONFIG_TARGETDIR" $repo $arch $CONFIG_INTEGRITY_CHECK
+			if ! repo-consistencycheck "$CONFIG_TARGETDIR" $repo $arch $CONFIG_INTEGRITY_CHECK
 			then
 				errlog \(EE\) reverting $repo/os/$arch to a consistent state failed
 				error=1

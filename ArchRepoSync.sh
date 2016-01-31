@@ -314,6 +314,20 @@ repo-getrsyncierules() {
 	echo " --exclude="*""
 }
 
+repo-backuparchcontrolfiles() {
+	local targetdir="$1"
+	local repo="$2"
+	local arch="$3"
+
+	for db in abs db files
+	do
+		if [ -e "$targetdir/$repo/os/$arch/$repo.$db.tar.gz" ]
+		then
+			cp "$targetdir/$repo/os/$arch/$repo.$db.tar.gz" "$targetdir/$repo/os/$arch/$repo.$db.tar.gz.consistent"
+		fi
+	done
+}
+
 repo-restoreconsistentcontrolfiles() {
 	local targetdir="$1"
 	local repo="$2"
@@ -387,6 +401,34 @@ repo-consistencycheck()
 	fi
 
 	return $?
+}
+
+repo-revertarch() {
+	local targetdir="$1"
+	local repo="$2"
+	local arch="$3"
+
+	errlog \(WW\) trying to revert to old db: $repo/os/$arch ...
+
+	for db in abs db files
+	do
+		if [ -e "$targetdir/$repo/os/$arch/$repo.$db.tar.gz.consistent" ]
+		then	
+			cp "$targetdir/$repo/os/$arch/$repo.$db.tar.gz.consistent" "$targetdir/$repo/os/$arch/$repo.$db.tar.gz"
+		fi
+	done
+
+	cp -r "$targetdir/$repo/os/backup/$arch/." "$targetdir/$repo/os/$arch/"
+	cp -r "$targetdir/$repo/os/backup/any/." "$targetdir/$repo/os/any/"
+
+	if ! repo-consistencycheck "$CONFIG_TARGETDIR" $repo $arch $CONFIG_INTEGRITY_CHECK
+	then
+		errlog \(EE\) reverting $repo/os/$arch to a consistent state failed
+		return 1
+	fi
+	
+	log 1 \(II\) reverting was successful
+	return 0
 }
 
 sync-packagesparallel() {
@@ -490,115 +532,100 @@ sync-getrepoarchconsistency() {
 	fi
 }
 
-config-setfromarguments "$@"
+main() {
+	config-setfromarguments "$@"
 
-if [ "$CONFIG_ACTION" = "usage" ]
-then
-	usage
-	exit 0
-fi
-
-if [ "$CONFIG_ACTION" = "check" ]
-then
-	log 1 "*** only checking consistency: $(date)"
-else
-	log 1 "*** synchronization started: $(date)"
-	log 1 \(II\) using mirror $CONFIG_MIRROR
-	log 1 \(II\) using $CONFIG_PARALLELDOWNLOADS parallel rsync instances
-	log 1 \(II\) repos: $CONFIG_REPOS
-	log 1 \(II\) archs: $CONFIG_ARCHS
-fi
-
-
-# prepare target directories
-for repo in $CONFIG_REPOS
-do
-	repo-mkdirtargetarchdirs "$CONFIG_TARGETDIR" "$repo"
-done
-
-if [ "$CONFIG_ACTION" = "sync" ]
-then
-	# package sync
-	sync-packagesparallel "$CONFIG_MIRROR" "$CONFIG_TARGETDIR" "$CONFIG_PARALLELDOWNLOADS" "$CONFIG_REPOS"
-
-	# iso sync
-	sync-iso "$CONFIG_MIRROR" "$CONFIG_TARGETDIR"
-fi
-
-error=0
-sync-getrepoarchconsistency "$CONFIG_TARGETDIR" "$CONFIG_REPOS" "$CONFIG_INTEGRITY_CHECK" | while read isconsistent repo arch
-do
-	if [ "$isconsistent" = "" ]
+	if [ "$CONFIG_ACTION" = "usage" ]
 	then
-		continue
+		usage
+		return 0
 	fi
 
-	if [ "$arch" != "" ]
+	if [ "$CONFIG_ACTION" = "check" ]
 	then
-		if ! [ $isconsistent -eq 1 ]
-		then
-			errlog \(WW\) $repo/os/$arch is inconsistent... trying to revert to old db...
-
-			for db in abs db files
-			do
-				if [ -e "$CONFIG_TARGETDIR/$repo/os/$arch/$repo.$db.tar.gz.consistent" ]
-				then	
-					cp "$CONFIG_TARGETDIR/$repo/os/$arch/$repo.$db.tar.gz.consistent" "$CONFIG_TARGETDIR/$repo/os/$arch/$repo.$db.tar.gz"
-				fi
-			done
-
-			cp -r "$CONFIG_TARGETDIR/$repo/os/backup/$arch/." "$CONFIG_TARGETDIR/$repo/os/$arch/"
-			cp -r "$CONFIG_TARGETDIR/$repo/os/backup/any/." "$CONFIG_TARGETDIR/$repo/os/any/"
-
-			if ! repo-consistencycheck "$CONFIG_TARGETDIR" $repo $arch $CONFIG_INTEGRITY_CHECK
-			then
-				errlog \(EE\) reverting $repo/os/$arch to a consistent state failed
-				error=1
-			else
-				log 1 \(II\) reverting was successful
-			fi
-		else
-			log 1 \(II\) $repo/os/$arch seems to be consistent
-
-			if [ "$CONFIG_ACTION" = "sync" ]
-			then
-				log 1 \(II\) cleaning up $repo/os/$arch ...
-
-				rm -rf "$CONFIG_TARGETDIR/$repo/os/backup/$arch"
-
-				log 1 \(II\) done cleaning up $repo/os/$arch.
-
-				for db in abs db files
-				do
-					if [ -e "$CONFIG_TARGETDIR/$repo/os/$arch/$repo.$db.tar.gz" ]
-					then
-						cp "$CONFIG_TARGETDIR/$repo/os/$arch/$repo.$db.tar.gz" "$CONFIG_TARGETDIR/$repo/os/$arch/$repo.$db.tar.gz.consistent"
-					fi
-				done
-			fi
-		fi
+		log 1 "*** only checking consistency: $(date)"
 	else
-		if [ $isconsistent -eq 1 ]
-		then
-			log 1 \(II\) $repo/os/\* seems to be consistent
+		log 1 "*** synchronization started: $(date)"
+		log 1 \(II\) using mirror $CONFIG_MIRROR
+		log 1 \(II\) using $CONFIG_PARALLELDOWNLOADS parallel rsync instances
+		log 1 \(II\) repos: $CONFIG_REPOS
+		log 1 \(II\) archs: $CONFIG_ARCHS
+	fi
 
-			if [ "$CONFIG_ACTION" = "sync" ]
+	if [ "$CONFIG_ACTION" = "sync" ]
+	then
+		# prepare target directories
+		for repo in $CONFIG_REPOS
+		do
+			repo-mkdirtargetarchdirs "$CONFIG_TARGETDIR" "$repo"
+		done
+
+		# package sync
+		sync-packagesparallel "$CONFIG_MIRROR" "$CONFIG_TARGETDIR" "$CONFIG_PARALLELDOWNLOADS" "$CONFIG_REPOS"
+
+		# iso sync
+		sync-iso "$CONFIG_MIRROR" "$CONFIG_TARGETDIR"
+	fi
+
+	local error=0
+	local isconsistent
+	local repo
+	local arch
+
+	sync-getrepoarchconsistency "$CONFIG_TARGETDIR" "$CONFIG_REPOS" "$CONFIG_INTEGRITY_CHECK" | while read isconsistent repo arch
+	do
+		if [ "$isconsistent" = "" ]
+		then
+			continue
+		fi
+
+		if [ "$arch" != "" ]
+		then
+			if ! [ $isconsistent -eq 1 ]
 			then
-				log 1 \(II\) cleaning up $repo/os ...
-				rm -rf "$CONFIG_TARGETDIR/$repo/os/backup"
+				errlog \(WW\) $repo/os/$arch is inconsistent
+
+				if ! repo-revertarch $CONFIG_TARGETDIR $repo $arch $CONFIG_INTEGRITY_CHECK
+				then
+					error=1
+				fi
+			else
+				log 1 \(II\) $repo/os/$arch seems to be consistent
+
+				if [ "$CONFIG_ACTION" = "sync" ]
+				then
+					log 1 \(II\) cleaning up $repo/os/$arch ...
+					rm -rf "$CONFIG_TARGETDIR/$repo/os/backup/$arch"
+					log 1 \(II\) done cleaning up $repo/os/$arch.
+
+					repo-backuparchcontrolfiles $CONFIG_TARGETDIR $repo $arch
+				fi
 			fi
 		else
-			error=1
+			if [ $isconsistent -eq 1 ]
+			then
+				log 1 \(II\) $repo/os/\* seems to be consistent
+
+				if [ "$CONFIG_ACTION" = "sync" ]
+				then
+					log 1 \(II\) cleaning up $repo/os ...
+					rm -rf "$CONFIG_TARGETDIR/$repo/os/backup"
+				fi
+			else
+				error=1
+			fi
 		fi
+	done
+
+	if ! [ $error -eq 0 ]
+	then
+		errlog \(EE\) This mirror has inconsistencies... please try again later!
+		log 1 "*** synchronization failed"
+	else
+		log 1 "*** synchronization finished"
 	fi
-done
 
-if ! [ $error -eq 0 ]
-then
-	errlog \(EE\) This mirror has inconsistencies... please try again later!
-	log 1 "*** synchronization failed"
-else
-	log 1 "*** synchronization finished"
-fi
+	return $error
+}
 
-exit $error
+main "$@"

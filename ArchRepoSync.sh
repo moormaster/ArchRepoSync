@@ -389,6 +389,107 @@ repo-consistencycheck()
 	return $?
 }
 
+sync-packagesparallel() {
+	local mirror="$1"
+	local targetdir="$2"
+	local paralleldownloads="$3"
+	local repos="$4"
+
+	local rsyncopts="-abv --copy-unsafe-links --no-motd --delete --ignore-errors --backup-dir=backup"
+
+	local dcount=0
+	for repo in $repos
+	do
+		local ierules="$( repo-getrsyncierules "$repo" )"
+
+		(
+			log 1 \(II\) syncing $repo/os ...
+
+			rsync $rsyncopts $ierules "$mirror/$repo/os/" "$targetdir/$repo/os/" 2>> "$targetdir/sync.log" 1> /dev/null
+			repo-restoreconsistentcontrolfiles "$targetdir" "$repo"
+
+			log 1 \(II\) done syncing $repo/os.
+		) &
+
+		dcount=$(( $dcount + 1))
+
+		if [ $dcount -ge $paralleldownloads ]
+		then
+			wait
+			dcount=0
+		fi
+	done
+
+	wait
+}
+
+sync-iso() {
+	local mirror="$1"
+	local targetdir="$2"
+
+	local ierules="--exclude="backup""
+	
+	mkdir -p "$targetdir/iso/latest"
+
+	log 1 \(II\) syncing iso images...	
+	rsync $rsyncopts $ierules "$mirror/iso/latest/" "$targetdir/iso/latest/" 2>> "$targetdir/sync.log" 1> /dev/null
+	log 1 \(II\) done syncing iso images.
+
+	log 1 \(II\) cleaning up iso images...
+	rm -rf "$targetdir/iso/latest/backup"
+
+	log 1 \(II\) done cleaning up iso images.
+}
+
+sync-getrepoarchconsistency() {
+	local targetdir="$1"
+	local repos="$2"
+	local integritycheck="$3"
+
+	local arch=""
+
+	local error=0
+	for repo in $repos
+	do
+		local repoerror=0
+
+		config-getarchs "$repo" | while read arch
+		do
+			if [ "$arch" = "any" ]
+			then
+				continue
+			fi
+	
+			if repo-consistencycheck "$targetdir" $repo $arch $integritycheck
+			then
+				# repo arch is consistent
+				echo "1 $repo $arch"
+			else
+				# repo arch is inconsistent
+				echo "0 $repo $arch" 
+				repoerror=1
+			fi
+		done
+	
+		if [ $repoerror -eq 0 ]
+		then
+			# repo is consistent
+			echo "1 $repo"
+		else
+			# repo is inconsistent
+			echo "0 $repo"
+			error=1
+		fi
+	done
+
+	if [ $error -eq 0 ]
+	then
+		return 1	# failure
+	else
+		return 0	# success
+	fi
+}
+
 setConfiguration "$@"
 
 if [ "$CONFIG_ACTION" = "usage" ]
@@ -415,75 +516,26 @@ do
 	repo-mkdirtargetarchdirs "$CONFIG_TARGETDIR" "$repo"
 done
 
-# repo package sync
 if [ "$CONFIG_ACTION" = "sync" ]
 then
-	rsyncopts="-abv --copy-unsafe-links --no-motd --delete --ignore-errors --backup-dir=backup"
+	# package sync
+	sync-packagesparallel "$CONFIG_MIRROR" "$CONFIG_TARGETDIR" "$CONFIG_PARALLELDOWNLOADS" "$CONFIG_REPOS"
 
-	dcount=0
-	for repo in $CONFIG_REPOS
-	do
-		ierules="$( repo-getrsyncierules "$repo" )"
-
-		(
-			log 1 \(II\) syncing $repo/os ...
-
-			rsync $rsyncopts $ierules "$CONFIG_MIRROR/$repo/os/" "$CONFIG_TARGETDIR/$repo/os/" 2>> "$CONFIG_TARGETDIR/sync.log" 1> /dev/null
-			repo-restoreconsistentcontrolfiles "$CONFIG_TARGETDIR" "$repo"
-
-			log 1 \(II\) done syncing $repo/os.
-		) &
-
-		dcount=$(( $dcount + 1))
-
-		if [ $dcount -ge $CONFIG_PARALLELDOWNLOADS ]
-		then
-			wait
-			dcount=0
-		fi
-	done
+	# iso sync
+	sync-iso "$CONFIG_MIRROR" "$CONFIG_TARGETDIR"
 fi
-
-# iso sync
-if [ "$CONFIG_ACTION" = "sync" ]
-then
-	wait
-
-	ierules="--exclude="backup""
-	
-	mkdir -p "$CONFIG_TARGETDIR/iso/latest"
-
-	log 1 \(II\) syncing iso images...	
-	rsync $rsyncopts $ierules "$CONFIG_MIRROR/iso/latest/" "$CONFIG_TARGETDIR/iso/latest/" 2>> "$CONFIG_TARGETDIR/sync.log" 1> /dev/null
-	log 1 \(II\) done syncing iso images.
-
-	log 1 \(II\) cleaning up iso images...
-	rm -rf "$CONFIG_TARGETDIR/iso/latest/backup"
-
-	log 1 \(II\) done cleaning up iso images.
-fi
-
-wait
 
 error=0
-errorold=0
-for repo in $CONFIG_REPOS
+sync-getrepoarchconsistency "$CONFIG_TARGETDIR" "$CONFIG_REPOS" "$CONFIG_INTEGRITY_CHECK" | while read isconsistent repo arch
 do
-	for arch in $CONFIG_ARCHS
-	do
-                if ( [ "$repo" = "multilib" ] || [ "$repo" = "multilib-testing" ] ) && [ "$arch" != "x86_64" ]
-                then
-                        continue
-                fi
+	if [ "$isconsistent" = "" ]
+	then
+		continue
+	fi
 
-		if [ "$arch" = "any" ]
-		then
-			continue
-		fi
-
-		log 1 \(II\) checking consistency of $repo/os/$arch ...
-
-		if ! repo-consistencycheck "$CONFIG_TARGETDIR" $repo $arch $CONFIG_INTEGRITY_CHECK
+	if [ "$arch" != "" ]
+	then
+		if ! [ $isconsistent -eq 1 ]
 		then
 			errlog \(WW\) $repo/os/$arch is inconsistent... trying to revert to old db...
 
@@ -498,7 +550,6 @@ do
 			cp -r "$CONFIG_TARGETDIR/$repo/os/backup/$arch/." "$CONFIG_TARGETDIR/$repo/os/$arch/"
 			cp -r "$CONFIG_TARGETDIR/$repo/os/backup/any/." "$CONFIG_TARGETDIR/$repo/os/any/"
 
-
 			if ! repo-consistencycheck "$CONFIG_TARGETDIR" $repo $arch $CONFIG_INTEGRITY_CHECK
 			then
 				errlog \(EE\) reverting $repo/os/$arch to a consistent state failed
@@ -506,28 +557,39 @@ do
 			else
 				log 1 \(II\) reverting was successful
 			fi
-		elif [ "$CONFIG_ACTION" = "sync" ]
-		then
-			log 1 \(II\) $repo/os/$arch seems to be consistent... cleaning up $repo/os/$arch ...
+		else
+			log 1 \(II\) $repo/os/$arch seems to be consistent
 
-			rm -rf "$CONFIG_TARGETDIR/$repo/os/backup/$arch"
+			if [ "$CONFIG_ACTION" = "sync" ]
+			then
+				log 1 \(II\) cleaning up $repo/os/$arch ...
 
-			log 1 \(II\) done cleaning up $repo/os/$arch.
+				rm -rf "$CONFIG_TARGETDIR/$repo/os/backup/$arch"
 
-			for db in abs db files
-			do
-				if [ -e "$CONFIG_TARGETDIR/$repo/os/$arch/$repo.$db.tar.gz" ]
-				then
-					cp "$CONFIG_TARGETDIR/$repo/os/$arch/$repo.$db.tar.gz" "$CONFIG_TARGETDIR/$repo/os/$arch/$repo.$db.tar.gz.consistent"
-				fi
-			done
+				log 1 \(II\) done cleaning up $repo/os/$arch.
+
+				for db in abs db files
+				do
+					if [ -e "$CONFIG_TARGETDIR/$repo/os/$arch/$repo.$db.tar.gz" ]
+					then
+						cp "$CONFIG_TARGETDIR/$repo/os/$arch/$repo.$db.tar.gz" "$CONFIG_TARGETDIR/$repo/os/$arch/$repo.$db.tar.gz.consistent"
+					fi
+				done
+			fi
 		fi
-	done
+	else
+		if [ $isconsistent -eq 1 ]
+		then
+			log 1 \(II\) $repo/os/\* seems to be consistent
 
-	if [ $error -eq 0 ] && [ "$CONFIG_ACTION" = "sync" ]
-	then
-		log 1 \(II\) $repo/os/\* seems to be consistent... cleaning up $repo/os ...
-		rm -rf "$CONFIG_TARGETDIR/$repo/os/backup"
+			if [ "$CONFIG_ACTION" = "sync" ]
+			then
+				log 1 \(II\) cleaning up $repo/os ...
+				rm -rf "$CONFIG_TARGETDIR/$repo/os/backup"
+			fi
+		else
+			error=1
+		fi
 	fi
 done
 

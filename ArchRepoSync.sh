@@ -263,7 +263,7 @@ repo-readmd5sums() {
 
 }
 
-repo-getarchs() {
+config-getarchs() {
 	local repo="$1"
 	local arch
 
@@ -281,9 +281,10 @@ repo-getarchs() {
 
 repo-getarchdirs() {
 	local repo="$1"
+
 	local arch=""
 
-	repo-getarchs "$repo" | while read arch
+	config-getarchs "$repo" | while read arch
 	do
 		echo "$repo/os/$arch"
 	done
@@ -292,9 +293,10 @@ repo-getarchdirs() {
 repo-mkdirtargetarchdirs() {
 	local targetdir="$1"
 	local repo="$2"
+
 	local arch=""
 
-	repo-getarchs "$repo" | while read arch
+	config-getarchs "$repo" | while read arch
 	do
 		mkdir -p "$targetdir/$repo/os/$arch"
 	done
@@ -302,9 +304,10 @@ repo-mkdirtargetarchdirs() {
 
 repo-getrsyncierules() {
 	local repo="$1"
+
 	local arch=""
 
-	repo-getarchs "$repo" | while read arch
+	config-getarchs "$repo" | while read arch
 	do
 		echo -n " --include="$arch" --include="$arch/**""
 	done
@@ -314,20 +317,23 @@ repo-getrsyncierules() {
 repo-restoreconsistentcontrolfiles() {
 	local targetdir="$1"
 	local repo="$2"
+
 	local arch=""
 
-	for arch in $CONFIG_ARCHS
+	config-getarchs "$repo" | while read arch
 	do
-		if ! [ "$arch" = "any" ]
+		if [ "$arch" = "any" ]
 		then
-			for db in abs db files
-			do
-				if [ -e "$targetdir/$repo/os/backup/$arch/$repo.$db.tar.gz.consistent" ]
-				then
-					mv "$targetdir/$repo/os/backup/$arch/$repo.$db.tar.gz.consistent" "$targetdir/$repo/os/$arch/"
-				fi
-			done
+			continue;
 		fi
+
+		for db in abs db files
+		do
+			if [ -e "$targetdir/$repo/os/backup/$arch/$repo.$db.tar.gz.consistent" ]
+			then
+				mv "$targetdir/$repo/os/backup/$arch/$repo.$db.tar.gz.consistent" "$targetdir/$repo/os/$arch/"
+			fi
+		done
 	done
 }
 
@@ -406,7 +412,7 @@ fi
 # prepare target directories
 for repo in $CONFIG_REPOS
 do
-	repo-mkdirtargetarchdirs "$CONFIG_TARGETDIR" "$repo" 
+	repo-mkdirtargetarchdirs "$CONFIG_TARGETDIR" "$repo"
 done
 
 # repo package sync

@@ -3,69 +3,6 @@
 #
 # ArchRepoSync - (c) 2009 by Andre Herbst, Greifswald
 #
-# Changelog:
-# 	2009 11 08
-#		- initial release
-#	2009 11 10
-#		- small fix: wrong existence check befor moving .consistent db files
-#	2009 12 01
-#		- also restore packages from 'any' architecture when reverting to an old state
-#	2010 01 28
-#		- display iso image sync status ... and also clean up iso backups
-#
-#	2010 02 05
-#		- added parameters to control arch and repo download
-#
-#	2010 02 24
-#		- read package filenames from the desc files to check consistency
-#
-#	2010 02 28
-#		- removed consistencycheck of .old databases
-#
-#	2010 03 16
-#		- added md5 integrity check switch
-#		- added check for missing any arch packages
-#
-#	2010 04 08
-#		- consistency_check_only does not remove backups anymore
-#
-#	2010 08 22
-#		- added copy-unsafe-links switch to rsync since some mirrors
-#		are storing files outside the archlinux trees and point links
-#		to them
-#
-#	2010 08 29
-#		- added multilib repo
-#
-#	2010 10 06
-#		- added gnome-unstable, kde-unstable, multilib-testing repos
-#
-#	2010 10 14
-#		- excluded !x86_64 archs from multilib-testing
-#
-#	2010 10 24
-#		- fixed include exclude rules to accept downloading a single arch
-#
-#	2011 05 28
-#		- removed extra exclude rule for backup dir
-#
-#	2011 05 31
-#		- added ignore-errors param to rsync
-#
-#	2013 11 18
-#		- added 'none' arch and 'none' repo to skip package sync
-#		- fixed iso sync
-#
-#	2013 11 23
-#		- removed debug output of NOARCHS and NOREPOS
-#
-#	2016 01 11
-#		- refactoring
-#			a) move argument parsing to function parseOpts
-#			b) move default configuration to function setDefaultConfiguration
-#			c) move configuration setting to function setConfiguration
-#		- added -t parameter (add testing repos)
-#		- added -d parameter (target dir)
 
 
 function setDefaultConfiguration() {

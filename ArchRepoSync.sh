@@ -5,7 +5,7 @@
 #
 
 
-function setDefaultConfiguration() {
+function config-setdefaults() {
 	#
 	# CONFIGURATION
 	#
@@ -48,8 +48,8 @@ function config-setfromarguments() {
 	local ARG_ADD_TESTING_REPOS=""
 	local ARG_VERBOSITY=0
 
-	setDefaultConfiguration
-	parseOpts "$@"
+	config-setdefaults
+	config-parsearguments "$@"
 	
 	if ! [ "$ARG_ARCHS" = "" ]
 	then
@@ -136,7 +136,7 @@ config-getarchs() {
 	done
 }
 
-function parseOpts() {
+function config-parsearguments() {
 	ARG_ARCHS=""
 	ARG_ONLY_CHECK_CONSISTENCY=0
 	ARG_TARGETDIR=""
@@ -277,17 +277,6 @@ repo-readmd5sums() {
 		return $error
 	)
 
-}
-
-repo-getarchdirs() {
-	local repo="$1"
-
-	local arch=""
-
-	config-getarchs "$repo" | while read arch
-	do
-		echo "$repo/os/$arch"
-	done
 }
 
 repo-mkdirtargetarchdirs() {

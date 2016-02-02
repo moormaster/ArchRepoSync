@@ -599,6 +599,7 @@ main() {
 				then
 					log 1 \(II\) cleaning up $repo/os ...
 					rm -rf "$CONFIG_TARGETDIR/$repo/os/backup"
+					log 1 \(II\) done cleaning up $repo/os
 				fi
 			else
 				error=1

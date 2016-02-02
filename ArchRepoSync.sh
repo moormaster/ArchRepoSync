@@ -610,9 +610,9 @@ main() {
 	if ! [ $error -eq 0 ]
 	then
 		errlog \(EE\) This mirror has inconsistencies... please try again later!
-		log 1 "*** synchronization failed"
+		log 1 "*** synchronization failed: $(date)"
 	else
-		log 1 "*** synchronization finished"
+		log 1 "*** synchronization finished: $(date)"
 	fi
 
 	return $error

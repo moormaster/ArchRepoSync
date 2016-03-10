@@ -250,6 +250,9 @@ repo-readmd5sums() {
 	local repo=$2
 	local arch=$3
 
+	local error=0
+
+	local pipefailwason=$( set +o | grep -c "set -o pipefail" )
 	set -o pipefail
 	repo-readdescs "$targetdir" "$repo" "$arch" | 
 	(
@@ -276,10 +279,13 @@ repo-readmd5sums() {
 		done
 
 		return $error
-	)
-	set +o pipefail
+	) || error=$?
+	if [ $pipefailwason -eq 0 ]
+	then
+		set +o pipefail
+	fi
 
-	return $?
+	return $error
 }
 
 repo-mkdirtargetarchdirs() {
@@ -351,8 +357,11 @@ repo-consistencycheck()
 	local arch=$3
 	local domd5sum=$4
 
+	local error=0
+
 	if ! [ "$arch" = "any" ]
 	then
+		local pipefailwason=$( set +o | grep -c "set -o pipefail" )
 		set -o pipefail
 		repo-readmd5sums "$targetdir" "$repo" "$arch" | 
 		(
@@ -390,13 +399,14 @@ repo-consistencycheck()
 			done
 
 			return $error
-		)
-		set +o pipefail
-
-		return $?
+		) || error=$?
+		if [ $pipefailwason -eq 0 ]
+		then
+			set +o pipefail
+		fi
 	fi
 
-	return 0
+	return $error
 }
 
 repo-revertarch() {
@@ -568,53 +578,59 @@ main() {
 	local repo
 	local arch
 
+	local pipefailwason=$( set +o | grep -c "set -o pipefail" )
 	set -o pipefail
-	sync-getrepoarchconsistency "$CONFIG_TARGETDIR" "$CONFIG_REPOS" "$CONFIG_INTEGRITY_CHECK" | while read isconsistent repo arch
-	do
-		if [ "$isconsistent" = "" ]
-		then
-			continue
-		fi
-
-		if [ "$arch" != "" ]
-		then
-			if ! [ $isconsistent -eq 1 ]
+	sync-getrepoarchconsistency "$CONFIG_TARGETDIR" "$CONFIG_REPOS" "$CONFIG_INTEGRITY_CHECK" | (
+		while read isconsistent repo arch
+		do
+			if [ "$isconsistent" = "" ]
 			then
-				errlog \(WW\) $repo/os/$arch is inconsistent
+				continue
+			fi
 
-				if ! repo-revertarch $CONFIG_TARGETDIR $repo $arch $CONFIG_INTEGRITY_CHECK
+			if [ "$arch" != "" ]
+			then
+				if ! [ $isconsistent -eq 1 ]
 				then
+					errlog \(WW\) $repo/os/$arch is inconsistent
+
+					if ! repo-revertarch $CONFIG_TARGETDIR $repo $arch $CONFIG_INTEGRITY_CHECK
+					then
+						error=1
+					fi
+				else
+					log 1 \(II\) $repo/os/$arch seems to be consistent
+	
+					if [ "$CONFIG_ACTION" = "sync" ]
+					then
+						log 1 \(II\) cleaning up $repo/os/$arch ...
+						rm -rf "$CONFIG_TARGETDIR/$repo/os/backup/$arch"
+						log 1 \(II\) done cleaning up $repo/os/$arch.
+
+						repo-backuparchcontrolfiles $CONFIG_TARGETDIR $repo $arch
+					fi
+				fi
+			else
+				if [ $isconsistent -eq 1 ]
+				then
+					log 1 \(II\) $repo/os/\* seems to be consistent
+
+					if [ "$CONFIG_ACTION" = "sync" ]
+					then
+						log 1 \(II\) cleaning up $repo/os ...
+						rm -rf "$CONFIG_TARGETDIR/$repo/os/backup"
+						log 1 \(II\) done cleaning up $repo/os
+					fi
+				else
 					error=1
 				fi
-			else
-				log 1 \(II\) $repo/os/$arch seems to be consistent
-
-				if [ "$CONFIG_ACTION" = "sync" ]
-				then
-					log 1 \(II\) cleaning up $repo/os/$arch ...
-					rm -rf "$CONFIG_TARGETDIR/$repo/os/backup/$arch"
-					log 1 \(II\) done cleaning up $repo/os/$arch.
-
-					repo-backuparchcontrolfiles $CONFIG_TARGETDIR $repo $arch
-				fi
 			fi
-		else
-			if [ $isconsistent -eq 1 ]
-			then
-				log 1 \(II\) $repo/os/\* seems to be consistent
-
-				if [ "$CONFIG_ACTION" = "sync" ]
-				then
-					log 1 \(II\) cleaning up $repo/os ...
-					rm -rf "$CONFIG_TARGETDIR/$repo/os/backup"
-					log 1 \(II\) done cleaning up $repo/os
-				fi
-			else
-				error=1
-			fi
-		fi
-	done
-	set +o pipefail
+		done
+	) || error=$?
+	if [ $pipefailwason -eq 0 ]
+	then
+		set +o pipefail
+	fi
 
 	if ! [ $error -eq 0 ]
 	then

@@ -256,7 +256,6 @@ repo-readmd5sums() {
 	set -o pipefail
 	repo-readdescs "$targetdir" "$repo" "$arch" | 
 	(
-		error=0
 		lastline=""
 
 		filename=""
@@ -277,9 +276,7 @@ repo-readmd5sums() {
 
 			lastline="$line"
 		done
-
-		return $error
-	) || error=$?
+	) || error=1
 	if [ $pipefailwason -eq 0 ]
 	then
 		set +o pipefail
@@ -365,7 +362,7 @@ repo-consistencycheck()
 		set -o pipefail
 		repo-readmd5sums "$targetdir" "$repo" "$arch" | 
 		(
-			error=0
+			local error=0
 
 			filename=""
 			md5sum=""
@@ -399,7 +396,7 @@ repo-consistencycheck()
 			done
 
 			return $error
-		) || error=$?
+		) || error=1
 		if [ $pipefailwason -eq 0 ]
 		then
 			set +o pipefail
@@ -501,23 +498,27 @@ sync-getrepoarchconsistency() {
 	do
 		local repoerror=0
 
-		config-getarchs "$repo" | while read arch
-		do
-			if [ "$arch" = "any" ]
-			then
-				continue
-			fi
+		config-getarchs "$repo" | (
+			local repoerror=0
+
+			while read arch
+			do
+				if [ "$arch" = "any" ]
+				then
+					continue
+				fi
 	
-			if repo-consistencycheck "$targetdir" $repo $arch $integritycheck
-			then
-				# repo arch is consistent
-				echo "1 $repo $arch"
-			else
-				# repo arch is inconsistent
-				echo "0 $repo $arch" 
-				repoerror=1
-			fi
-		done
+				if repo-consistencycheck "$targetdir" $repo $arch $integritycheck
+				then
+					# repo arch is consistent
+					echo "1 $repo $arch"
+				else
+					# repo arch is inconsistent
+					echo "0 $repo $arch" 
+					repoerror=1
+				fi
+			done
+		) || repoerror=1
 	
 		if [ $repoerror -eq 0 ]
 		then
@@ -530,12 +531,7 @@ sync-getrepoarchconsistency() {
 		fi
 	done
 
-	if [ $error -eq 0 ]
-	then
-		return 1	# failure
-	else
-		return 0	# success
-	fi
+	return $error
 }
 
 main() {
@@ -581,6 +577,8 @@ main() {
 	local pipefailwason=$( set +o | grep -c "set -o pipefail" )
 	set -o pipefail
 	sync-getrepoarchconsistency "$CONFIG_TARGETDIR" "$CONFIG_REPOS" "$CONFIG_INTEGRITY_CHECK" | (
+		local error=0
+
 		while read isconsistent repo arch
 		do
 			if [ "$isconsistent" = "" ]
@@ -626,7 +624,9 @@ main() {
 				fi
 			fi
 		done
-	) || error=$?
+
+		return $error
+	) || error=1
 	if [ $pipefailwason -eq 0 ]
 	then
 		set +o pipefail

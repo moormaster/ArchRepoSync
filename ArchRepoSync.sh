@@ -250,6 +250,7 @@ repo-readmd5sums() {
 	local repo=$2
 	local arch=$3
 
+	set -o pipefail
 	repo-readdescs "$targetdir" "$repo" "$arch" | 
 	(
 		error=0
@@ -276,7 +277,9 @@ repo-readmd5sums() {
 
 		return $error
 	)
+	set +o pipefail
 
+	return $?
 }
 
 repo-mkdirtargetarchdirs() {
@@ -350,6 +353,7 @@ repo-consistencycheck()
 
 	if ! [ "$arch" = "any" ]
 	then
+		set -o pipefail
 		repo-readmd5sums "$targetdir" "$repo" "$arch" | 
 		(
 			error=0
@@ -387,9 +391,12 @@ repo-consistencycheck()
 
 			return $error
 		)
+		set +o pipefail
+
+		return $?
 	fi
 
-	return $?
+	return 0
 }
 
 repo-revertarch() {
@@ -561,6 +568,7 @@ main() {
 	local repo
 	local arch
 
+	set -o pipefail
 	sync-getrepoarchconsistency "$CONFIG_TARGETDIR" "$CONFIG_REPOS" "$CONFIG_INTEGRITY_CHECK" | while read isconsistent repo arch
 	do
 		if [ "$isconsistent" = "" ]
@@ -606,6 +614,7 @@ main() {
 			fi
 		fi
 	done
+	set +o pipefail
 
 	if ! [ $error -eq 0 ]
 	then

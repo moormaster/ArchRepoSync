@@ -472,6 +472,7 @@ sync-iso() {
 	local mirror="$1"
 	local targetdir="$2"
 
+	local rsyncopts="-abv --copy-unsafe-links --no-motd --delete --ignore-errors --backup-dir=backup"
 	local ierules="--exclude="backup""
 	
 	mkdir -p "$targetdir/iso/latest"

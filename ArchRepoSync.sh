@@ -16,7 +16,7 @@ function config-setdefaults() {
 
 	CONFIG_REPOS="core extra community multilib"
 	CONFIG_TESTINGREPOS="community-testing gnome-unstable kde-unstable multilib-testing testing"
-	CONFIG_ARCHS="i686 x86_64"
+	CONFIG_ARCHS="x86_64"
 
 	CONFIG_INTEGRITY_CHECK=0
 	CONFIG_PARALLELDOWNLOADS=4
